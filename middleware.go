@@ -7,7 +7,9 @@ package gojiutil
 import (
 	"net/http"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/zenazn/goji/web"
@@ -111,6 +113,24 @@ func FormParser(c *web.C, h http.Handler) http.Handler {
 			ErrorString(*c, rw, http.StatusBadRequest, err.Error())
 			return
 		}
+		h.ServeHTTP(rw, r)
+	})
+}
+
+var RequestIDHeader = "X-Request-Id"
+var reqid int64 = time.Now().UTC().Unix()
+
+// RequestID injects a request ID into the context of each request. Retrieve it using
+// goji's GetReqID(). If the incoming request has a header of RequestIDHeader then that
+// values is used, else a random value is generated
+func RequestID(c *web.C, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		id := r.Header.Get(RequestIDHeader)
+		if id == "" {
+			id = strconv.FormatInt(atomic.AddInt64(&reqid, 1), 10)
+		}
+		c.Env[middleware.RequestIDKey] = id
+
 		h.ServeHTTP(rw, r)
 	})
 }
