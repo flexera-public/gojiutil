@@ -37,7 +37,7 @@ func AddCommon15(mx *web.Mux, log log15.Logger) {
 // Assumes that c.Env is allocated, use goji/middleware.EnvInit for that
 // Prints a requestID if one is present, use goji/middleware.RequestID
 // Prints the requestor's IP address, use goji/middleware.RealIP
-func Logger15(log15.Logger) web.MiddlewareType {
+func Logger15(logger log15.Logger) web.MiddlewareType {
 	// Logger15 returns a middleware (which is a function):
 	return func(c *web.C, h http.Handler) http.Handler {
 		// The middleware returns a function to process requests:
@@ -74,12 +74,12 @@ func Logger15(log15.Logger) web.MiddlewareType {
 				if s, ok := c.Env["stack"].(string); ok {
 					ctx["stack"] = s
 				}
-				log15.Crit(path, ctx)
+				logger.Crit(path, ctx)
 			// for 400 errors log a warning (debatable)
 			case s >= 400:
-				log15.Warn(path, ctx)
+				logger.Warn(path, ctx)
 			default:
-				log15.Info(path, ctx)
+				logger.Info(path, ctx)
 			}
 		})
 	}
