@@ -20,7 +20,7 @@ install:
   - export PATH=$PATH:$HOME/gopath/bin # travis' worker doesn't seem to do this consistently
   - make depend
 
-before_script: make build
+before_script: make
 
 # Everything else in here, we don't put the uploads into an after_success section because
 # that can cause the build to succeed even if the artifacts are not actually uploaded
