@@ -58,8 +58,7 @@ lint:
 	go tool vet -composites=false *.go
 	#go tool vet -composites=false **/*.go
 
-travis-test: lint
-	ginkgo -r -cover
+travis-test: cover
 
 # running ginkgo twice, sadly, the problem is that -cover modifies the source code with the effect
 # that if there are errors the output of gingko refers to incorrect line numbers
@@ -68,3 +67,11 @@ test: lint
 	ginkgo -r
 	ginkgo -r -cover
 	go tool cover -func=`basename $$PWD`.coverprofile
+
+cover: lint version
+	ginkgo -r --randomizeAllSpecs --randomizeSuites --failOnPending -cover
+	@echo 'mode: atomic' >_total
+	@for f in `find . -name \*.coverprofile`; do tail -n +2 $$f >>_total; done
+	@mv _total total.coverprofile
+	@COVERAGE=$$(go tool cover -func=total.coverprofile | grep "^total:" coverage.txt | grep -o "[0-9\.]*");\
+	  echo "*** Code Coverage is $$COVERAGE% ***"

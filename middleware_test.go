@@ -30,10 +30,11 @@ var _ = Describe("Logger15", func() {
 			called = true
 		}))
 		resp, req = dummyRequest()
+		called = false
 	})
 
 	It("calls the handler", func() {
-		mx.ServeHTTP(dummyRequest())
+		mx.ServeHTTP(resp, req)
 		Ω(called).Should(BeTrue())
 	})
 

@@ -89,12 +89,13 @@ func Logger15(logger log15.Logger) web.MiddlewareType {
 						ctx = append(ctx, fmt.Sprintf("stack%d", i), funcName+" @ "+sourceLine)
 					}
 				}
-				log15.Crit(path, ctx...)
+				logger.Crit(path, ctx...)
 			// for 400 errors log a warning (debatable)
 			case s >= 400:
-				log15.Warn(path, ctx...)
+				logger.Warn(path, ctx...)
+			// for everything else just log info
 			default:
-				log15.Info(path, ctx...)
+				logger.Info(path, ctx...)
 			}
 		})
 	}
