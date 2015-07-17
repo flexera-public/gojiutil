@@ -5,6 +5,7 @@
 package gojiutil
 
 import (
+	"fmt"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -42,44 +43,58 @@ func Logger15(logger log15.Logger) web.MiddlewareType {
 	return func(c *web.C, h http.Handler) http.Handler {
 		// The middleware returns a function to process requests:
 		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
-			ctx := make(log15.Ctx)
+			ctx := make([]interface{}, 0)
 
 			// record info about the request
-			ctx["verb"] = r.Method
+			ctx = append(ctx, "verb", r.Method)
 			path := r.URL.Path
 			if id := middleware.GetReqID(*c); id != "" {
-				ctx["id"] = id
+				ctx = append(ctx, "id", id)
 			}
 			ip := r.RemoteAddr
 			if ip != "" {
-				ctx["ip"] = ip
+				ctx = append(ctx, "ip", ip)
 			}
 
 			// call handler down the stack with a wrapper writer so we see what it does
 			wp := mutil.WrapWriter(rw)
 			start := time.Now()
 			h.ServeHTTP(wp, r)
-			ctx["time"] = time.Now().Sub(start)
+			ctx = append(ctx, "time", time.Now().Sub(start).String())
 
 			// record info about the response
 			s := wp.Status()
-			ctx["status"] = s
+			ctx = append(ctx, "status", strconv.Itoa(s))
 			if e, ok := c.Env["err"].(string); ok {
-				ctx["err"] = e
+				ctx = append(ctx, "err", e)
 			}
 
 			switch {
 			// for 500 errors be prepared to log a stack trace
 			case s >= 500:
-				if s, ok := c.Env["stack"].(string); ok {
-					ctx["stack"] = s
+				switch s := c.Env["stack"].(type) {
+				case string:
+					ctx = append(ctx, "stack", s)
+				case []string:
+					// got full stack trace, then remove goroutine number
+					// and top-level (which is where runtime.Stack is called)
+					if strings.HasPrefix(s[0], "goroutine") && len(s) > 3 {
+						s = s[3:]
+					}
+					// now put top N levels into stack%d variables
+					const levels = 3 // number of stack levels to print
+					for i := 0; i < levels && 2*i+1 < len(s); i += 1 {
+						funcName := s[2*i][:strings.Index(s[2*i], "(")]
+						sourceLine := strings.TrimLeft(s[2*i+1], "\t")
+						ctx = append(ctx, fmt.Sprintf("stack%d", i), funcName+" @ "+sourceLine)
+					}
 				}
-				logger.Crit(path, ctx)
+				log15.Crit(path, ctx...)
 			// for 400 errors log a warning (debatable)
 			case s >= 400:
-				logger.Warn(path, ctx)
+				log15.Warn(path, ctx...)
 			default:
-				logger.Info(path, ctx)
+				log15.Info(path, ctx...)
 			}
 		})
 	}
@@ -97,7 +112,10 @@ func Recoverer(c *web.C, h http.Handler) http.Handler {
 				const size = 64 << 10 // 64KB
 				buf := make([]byte, size)
 				buf = buf[:runtime.Stack(buf, false)]
-				c.Env["stack"] = strings.Replace(string(buf), "\n", " || ", -1)
+				lines := strings.Split(string(buf), "\n")
+				//log15.Warn("Panic skipping", "l0", lines[0], "l1", lines[1],
+				//	"l2", lines[2])
+				c.Env["stack"] = lines[3:]
 				Errorf(*c, rw, 500, "panic: %v", err)
 			}
 		}()
