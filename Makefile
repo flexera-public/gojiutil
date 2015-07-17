@@ -68,7 +68,7 @@ test: lint
 	ginkgo -r -cover
 	go tool cover -func=`basename $$PWD`.coverprofile
 
-cover: lint version
+cover: lint
 	ginkgo -r --randomizeAllSpecs --randomizeSuites --failOnPending -cover
 	@echo 'mode: atomic' >_total
 	@for f in `find . -name \*.coverprofile`; do tail -n +2 $$f >>_total; done
