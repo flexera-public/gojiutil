@@ -6,9 +6,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"runtime"
+	"strings"
 
 	"github.com/zenazn/goji/web"
 	"github.com/zenazn/goji/web/middleware"
+	"gopkg.in/inconshreveable/log15.v2"
 )
 
 var ApplicationJSON = "application/json"
@@ -35,11 +38,8 @@ func WriteJSON(c web.C, rw http.ResponseWriter, code int, obj interface{}) {
 		rw.WriteHeader(code)
 		rw.Write(buf) // we ignore errors here, sigh
 	} else {
-		c.Env["err"] = err.Error()
-		rw.WriteHeader(http.StatusInternalServerError)
-		errStr := fmt.Sprintf(`{"err": "Internal Error", "request_id": "%s"}`,
-			middleware.GetReqID(c))
-		rw.Write([]byte(errStr))
+		log15.Info("WriteJSON calling ErrorInternal")
+		ErrorInternal(c, rw, err)
 	}
 }
 
@@ -58,12 +58,19 @@ func ErrorString(c web.C, rw http.ResponseWriter, code int, str string) {
 
 // Convenience function to call ErrorString with a format string
 func Errorf(c web.C, rw http.ResponseWriter, code int, message string, args ...interface{}) {
-	str := fmt.Sprintf(message, args)
+	str := fmt.Sprintf(message, args...)
 	ErrorString(c, rw, code, str)
 }
 
 // Convenience function to produce an internal error based on the err argument
 func ErrorInternal(c web.C, rw http.ResponseWriter, err error) {
+	// produce stack backtrace, max 64KB
+	const size = 64 << 10 // 64KB
+	buf := make([]byte, size)
+	buf = buf[:runtime.Stack(buf, false)]
+	lines := strings.Split(string(buf), "\n")
+	c.Env["stack"] = lines[3:]
+
 	if err != nil {
 		ErrorString(c, rw, 500, err.Error())
 	} else {
