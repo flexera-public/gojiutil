@@ -34,6 +34,18 @@ func AddCommon15(mx *web.Mux, log log15.Logger) {
 	mx.Use(FormParser)
 }
 
+// Create a simple middleware that merges a map into c.Env
+func EnvAdd(m map[string]interface{}) web.MiddlewareType {
+	return func(c *web.C, h http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			for k, v := range m {
+				c.Env[k] = v
+			}
+			h.ServeHTTP(rw, r)
+		})
+	}
+}
+
 // Create a logger middleware that logs HTTP requests and results to log15
 // Assumes that c.Env is allocated, use goji/middleware.EnvInit for that
 // Prints a requestID if one is present, use goji/middleware.RequestID
