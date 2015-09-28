@@ -7,7 +7,9 @@ package gojiutil
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"runtime"
 	"strconv"
@@ -222,6 +224,64 @@ func ContextLogger(c *web.C, h http.Handler) http.Handler {
 			c.Env[ContextLog] = log15.New("req", id)
 		}
 
+		h.ServeHTTP(rw, r)
+	})
+}
+
+// GetJSONBody is a middleware to read and parse an application/json body and store it in
+// c.Env["json"] as a map[string]interface{}, which can be easily mapped to a proper struct
+// using github.com/mitchellh/mapstructure.
+// This middleware is pretty permissive: it allows for having no content-length and no
+// content-type as long as either there's no body or the body parses as json.
+func GetJSONBody(c *web.C, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		var err error
+
+		// parse content-length header
+		cl := 0
+		if clh := r.Header.Get("content-length"); clh != "" {
+			if cl, err = strconv.Atoi(clh); err != nil {
+				ErrorString(*c, rw, 400, "Invalid content-length: "+err.Error())
+				return
+			}
+		}
+
+		// parse content-type header
+		if ct := r.Header.Get("content-type"); ct != "" && ct != "application/json" {
+			ErrorString(*c, rw, 400,
+				"Invalid content-type '"+ct+"', application/json expected")
+			return
+		}
+
+		/*
+			// get the context logger, if available
+			log, _ := c.Env[ContextLog].(log15.Logger)
+			if log == nil {
+				log = log15.Root()
+			}
+		*/
+
+		// try to read body
+		var js map[string]interface{}
+		err = json.NewDecoder(r.Body).Decode(&js)
+		switch err {
+		case io.EOF:
+			if cl != 0 {
+				ErrorString(*c, rw, 400, "Premature EOF reading post body")
+				return
+			}
+			//log.Debug("HTTP no request body")
+			// got no body, so we're OK
+		case nil:
+			//log.Debug("HTTP Context", "body", js)
+			// great!
+		default:
+			ErrorString(*c, rw, 400, "Cannot parse JSON request body: "+
+				err.Error())
+			return
+		}
+
+		c.Env["json"] = js
 		h.ServeHTTP(rw, r)
 	})
 }
