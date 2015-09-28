@@ -5,6 +5,8 @@
 package gojiutil
 
 import (
+	"crypto/rand"
+	"encoding/base64"
 	"fmt"
 	"net/http"
 	"runtime"
@@ -19,16 +21,20 @@ import (
 	"gopkg.in/inconshreveable/log15.v2"
 )
 
+// ContextLog is the hash key in which ContextLogger places the log15 context logger
+var ContextLog string = "log"
+
 // Add the following common middlewares: EnvInit, RealIP, RequestID
 func AddCommon(mx *web.Mux) {
 	mx.Use(middleware.EnvInit)
-	mx.Use(middleware.RequestID)
+	mx.Use(RequestID)
 	mx.Use(middleware.RealIP)
 }
 
 // Add the following common middlewares: EnvInit, RealIP, RequestID, Logger15, Recoverer, FormParser
 func AddCommon15(mx *web.Mux, log log15.Logger) {
 	AddCommon(mx)
+	mx.Use(ContextLogger)
 	mx.Use(Logger15(log))
 	mx.Use(Recoverer)
 	mx.Use(FormParser)
@@ -58,11 +64,11 @@ func Logger15(logger log15.Logger) web.MiddlewareType {
 			ctx := make([]interface{}, 0)
 
 			// record info about the request
+			if id := middleware.GetReqID(*c); id != "" {
+				ctx = append(ctx, "req", id)
+			}
 			ctx = append(ctx, "verb", r.Method)
 			path := r.URL.Path
-			if id := middleware.GetReqID(*c); id != "" {
-				ctx = append(ctx, "id", id)
-			}
 			ip := r.RemoteAddr
 			if ip != "" {
 				ctx = append(ctx, "ip", ip)
@@ -113,6 +119,34 @@ func Logger15(logger log15.Logger) web.MiddlewareType {
 	}
 }
 
+// ParamsLogger logs all query string / form parameters primarily for debug purposes. It logs
+// at the start of a request using log15.Debug (or c.Env[ContextLog].Debug if defined) unlike
+// the Logger15 middleware, which logs at the end. If verbose is true then
+// the c.URLParams and the c.Env hashes are also logged
+func ParamsLogger(verbose bool) web.MiddlewareType {
+	return func(c *web.C, h http.Handler) http.Handler {
+		return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+			params := []interface{}{}
+			for k, v := range r.Form {
+				params = append(params, k, v[0])
+			}
+			log, ok := c.Env[ContextLog].(log15.Logger)
+			if !ok || log == nil {
+				log = log15.Root()
+			}
+			if verbose {
+				log.Debug("Begin "+r.Method+" "+r.URL.Path,
+					"params", fmt.Sprintf("%+v", params),
+					"URLParams", fmt.Sprintf("%+v", c.URLParams),
+					"Env", fmt.Sprintf("%+v", c.Env))
+			} else {
+				log.Debug("Begin "+r.Method+" "+r.URL.Path, params...)
+			}
+			h.ServeHTTP(rw, r)
+		})
+	}
+}
+
 // Create a panic-catching middleware for Echo that ensures the server doesn't die if one of
 // the handlers panics. Also puts the call stack into the Echo Context which causes the logger
 // middleware to log it.
@@ -149,18 +183,44 @@ func FormParser(c *web.C, h http.Handler) http.Handler {
 }
 
 var RequestIDHeader = "X-Request-Id"
-var reqid int64 = time.Now().UTC().Unix()
+var reqPrefix string
+var reqID int64
+
+func init() {
+	// algorithm taken from https://github.com/zenazn/goji/blob/master/web/middleware/request_id.go#L44-L50
+	var buf [12]byte
+	var b64 string
+	for len(b64) < 10 {
+		rand.Read(buf[:])
+		b64 = base64.StdEncoding.EncodeToString(buf[:])
+		b64 = strings.NewReplacer("+", "", "/", "").Replace(b64)
+	}
+	reqPrefix = string(b64[0:10])
+}
 
 // RequestID injects a request ID into the context of each request. Retrieve it using
 // goji's GetReqID(). If the incoming request has a header of RequestIDHeader then that
-// values is used, else a random value is generated
+// value is used, else a random value is generated
 func RequestID(c *web.C, h http.Handler) http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get(RequestIDHeader)
 		if id == "" {
-			id = strconv.FormatInt(atomic.AddInt64(&reqid, 1), 10)
+			id = fmt.Sprintf("%s-%d", reqPrefix, atomic.AddInt64(&reqID, 1))
 		}
 		c.Env[middleware.RequestIDKey] = id
+
+		h.ServeHTTP(rw, r)
+	})
+}
+
+// ContextLogger injects a log15 logger that is initialized to print the request ID. It
+// assumes that c.Env[middleware.RequestIDKey] is set (e.g. by the RequestID middleware).
+// It puts the logger into c.Env[gojiutil.ContextLogger].
+func ContextLogger(c *web.C, h http.Handler) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		if id, ok := c.Env[middleware.RequestIDKey].(string); ok {
+			c.Env[ContextLog] = log15.New("req", id)
+		}
 
 		h.ServeHTTP(rw, r)
 	})
